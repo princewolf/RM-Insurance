@@ -1,0 +1,153 @@
+---
+title: "Test analisa data Insurance"
+author: "Ronny Raharjo"
+date: "2/16/2020"
+output: 
+  html_document:
+    theme: readable
+    highligh: zenburn
+    toc: true 
+    toc_float: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F)
+```
+
+# Background
+## Setup
+Library yang akan digunakan pada analisis regresi
+```{r}
+library(dplyr)
+library(GGally)
+library(lmtest)
+library(car)
+library(ggplot2)
+library(leaps)
+library(MLmetrics)
+```
+
+# Eksplorasi data
+Read data yang akan digunakan
+```{r}
+insurance <- read.csv("insurance.csv")
+data_test <- read.csv("insurance_test.csv")
+```
+
+Berikut merupakan deskripsi dari variabel data insurance:        
+- age: umur        
+- sex: jenis kelamin        
+- bmi: body mass index (ideal di angka 18.5-24.9)         
+- children: jumlah anak           
+- smoker: merokok atau tidak        
+- region: wilayah          
+- charges: premi yang harus dibayarkan nasabah        
+
+
+pada kasus ini kita akan memprediksi besarnya premi (charges) yang harus dibayar nasabah berdasarkan variabel- variabel yang ada. Sebelum melakukan eksplorasi lebih dalam, lakukan pengecekan tipe data terlebih dahulu
+
+```{r}
+str(insurance)
+```
+
+dari pengecekan tipe data diatas didapati jumlah observasi sebanyak 1071 dan 7 variabel. Untuk mengetahui hubungan antar data yang numerik bisa menggunakan fungsi `ggcorr` dari packages `GGally`
+
+```{r message=F, warning=F}
+ggcorr(insurance, label = T)
+```
+dari visualisasi diatas bisa dilihat bahwa korelasi antar variabel relatif kecil. Korelasi tertinggi dimiliki oleh hubungan charges dengan age sebesar 0.3.
+Selain melakukan pengecekan korelasi antar nilai numerik, kita bisa mengeksplor hubungan antar variabel menggunakan visualisasi.
+
+```{r fig.width=12}
+ggpairs(insurance)
+```
+
+
+pengecekan outlier juga dapat dilakukan untuk variabel `charges`
+```{r}
+boxplot(insurance$charges)
+```
+
+dari visualisasi diatas bisa dilihat bahwa data banyak mengandung outlier. Untuk mengatasi masalah outlier ini ada 2 solusi yaitu :    
+1. melakukan remove outlier      
+2. melakukan transformasi data (fungsi log)     
+untuk analisis kali ini kita tidak akan meremove outlier.
+
+# Modeling
+Tahap selanjutnya adalah proses pembuatan model. Pada proses kali ini kita akan membuat model dengan semua varibel terlebih dahulu
+```{r}
+model_full <- lm(charges~.,insurance)
+summary(model_full)
+```
+dari hasil model diatas, didapati Adj R-square sebesar 0.75, namun masih banyak predictor yang tidak signifikan. Langkah selanjutnya adalah melakukan feature selection dengan cara step wise. Pada step wise kali ini direction yang digunakan adalah backward
+```{r}
+model_bw <- step(model_full, direction = "backward")
+summary(model_bw)
+```
+dengan menggunakan fungsi step wise kita mendapatkan Adj R-square yang sama yaitu 0.75 namun predictor yang digunakan lebih sedikit. Dari model_bw ini kita bisa mengetahui bahwa age, bmi, children, dan smoke memiliki pengaruh yang positif terhadap charges.
+
+Untuk memastikan bahwa model_bw sudah optimal, kita akan melakukan pengecekan model_bw menggunakan fungsi regsubset
+```{r fig.width=12}
+
+reg_sub <- regsubsets(charges ~ age + bmi + children + smoker, data = insurance, nbest = 2)
+plot(reg_sub, scale = "adjr2")
+```
+
+
+dari model diatas didapati bahwa penggunaan semua age,bmi,children, dan smoker adalah kombinasi yang terbaik untuk menghasilkan adj R-square tertinggi.
+
+
+# Asumsi 
+
+## Normality
+Pengecekan normality residual bisa di cek menggunakan fungsi shapiro.test, dari hasil pengecekan normality didapat bahwa residual tidak menyebar normal. Salah satu faktor penyebab residual tidak menyebar normal adalah target variabel yang tidak menyebar normal
+```{r}
+shapiro.test(model_bw$residuals)
+```
+
+
+## Homoscedasticity
+Pengecekan homoscedasticity menggunakan fungsi bptest menghasilkan p-value lebih kecil dari alpha. Hal ini menunjukkan bahwa ragam dari error tidak tetap. Salah satu cara untuk mengatasi ini adalah melakukan subset data yang digunakan diawal
+```{r}
+bptest(model_bw)
+```
+
+## Multicolinearity
+Nilai VIF yang didapat pada model_bw tidak ada yang diatas 10, hal ini menandakan bahwa tidak adanya multicolinearity pada model_bw
+
+```{r}
+vif(model_bw)
+```
+
+## Linearity
+Linearity perlu dilakukan pengecekan karena pada pemodelan ini kita menggunakan linear regression. Terdapat 2 variabel numerik yang perlu di cek yaitu bmi dan children
+```{r}
+cor.test(insurance$bmi, insurance$charges)
+```
+
+
+```{r}
+cor.test(insurance$children, insurance$charges)
+```
+
+dari pengecekan kedua linearity diatas diketahui bahwa kedua variabel memiliki hubungan dengan variabel charges
+
+
+# Prediction
+
+Tahap terakhir adalah melakukan prediksi terhadap data test
+```{r}
+pred <- predict(model_bw, data_test)
+```
+
+setelah dilakukan prediksi terhadap data test, perlu dilakukan pengeceakan error untuk mengetahui seberapa besar kesalahan yang dihasilkan.
+```{r}
+RMSE(pred, data_test$charges)
+MAE(pred, data_test$charges)
+```
+
+
+
+# Kesimpulan 
+Dalam analisis ini terdapat 2 asumsi yang masih belum terpenuhi yaitu normality of residual dan homoscedasticity. Hal ini bisa atasi dengan melakukan scaling terhadap data yang tidak menyebar normal, dan melakukan filtering terhadap data test. Error yang dihasilkan dalam prediksi ini adalah 6156.822 untuk RMSE dan 4224.226 untk MAE
